@@ -5,14 +5,14 @@ import copy
 import textwrap
 import unittest
 from typing import Any, Dict  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 from amundsen_common.models.dashboard import DashboardSummary
 from amundsen_common.models.popular_table import PopularTable
-from amundsen_common.models.table import (Application, Badge, Column, Source,
-                                          Stat, Table, Tag, User,
-                                          Watermark, ProgrammaticDescription)
-from amundsen_common.models.user import UserSchema
-from unittest.mock import MagicMock, patch
+from amundsen_common.models.table import (Application, Badge, Column,
+                                          ProgrammaticDescription, Source,
+                                          Stat, Table, Tag, User, Watermark)
+from amundsen_common.models.user import User as UserModel
 from neo4j import GraphDatabase
 
 from metadata_service import create_app
@@ -45,18 +45,18 @@ class TestNeo4jProxy(unittest.TestCase):
 
         col1 = copy.deepcopy(table_entry)  # type: Dict[Any, Any]
         col1['col'] = {'name': 'bar_id_1',
-                       'type': 'varchar',
+                       'col_type': 'varchar',
                        'sort_order': 0}
         col1['col_dscrpt'] = {'description': 'bar col description'}
-        col1['col_stats'] = [{'stat_name': 'avg', 'start_epoch': 1, 'end_epoch': 1, 'stat_val': '1'}]
+        col1['col_stats'] = [{'stat_type': 'avg', 'start_epoch': 1, 'end_epoch': 1, 'stat_val': '1'}]
         col1['col_badges'] = []
 
         col2 = copy.deepcopy(table_entry)  # type: Dict[Any, Any]
         col2['col'] = {'name': 'bar_id_2',
-                       'type': 'bigint',
+                       'col_type': 'bigint',
                        'sort_order': 1}
         col2['col_dscrpt'] = {'description': 'bar col2 description'}
-        col2['col_stats'] = [{'stat_name': 'avg', 'start_epoch': 2, 'end_epoch': 2, 'stat_val': '2'}]
+        col2['col_stats'] = [{'stat_type': 'avg', 'start_epoch': 2, 'end_epoch': 2, 'stat_val': '2'}]
         col2['col_badges'] = [{'key': 'primary key', 'category': 'column'}]
 
         table_level_results = MagicMock()
@@ -412,7 +412,7 @@ class TestNeo4jProxy(unittest.TestCase):
             self.assertEqual(mock_run.call_count, 1)
             self.assertEqual(mock_commit.call_count, 1)
 
-    def test_add_badge(self) -> None:
+    def test_add_table_badge(self) -> None:
         with patch.object(GraphDatabase, 'driver') as mock_driver:
             mock_session = MagicMock()
             mock_driver.return_value.session.return_value = mock_session
@@ -427,7 +427,29 @@ class TestNeo4jProxy(unittest.TestCase):
 
             neo4j_proxy = Neo4jProxy(host='DOES_NOT_MATTER', port=0000)
             neo4j_proxy.add_badge(id='dummy_uri',
-                                  badge_name='hive')
+                                  badge_name='hive',
+                                  resource_type=ResourceType.Table)
+            # we call neo4j twice in add_tag call
+            self.assertEqual(mock_run.call_count, 3)
+            self.assertEqual(mock_commit.call_count, 1)
+
+    def test_add_column_badge(self) -> None:
+        with patch.object(GraphDatabase, 'driver') as mock_driver:
+            mock_session = MagicMock()
+            mock_driver.return_value.session.return_value = mock_session
+
+            mock_transaction = MagicMock()
+            mock_session.begin_transaction.return_value = mock_transaction
+
+            mock_run = MagicMock()
+            mock_transaction.run = mock_run
+            mock_commit = MagicMock()
+            mock_transaction.commit = mock_commit
+
+            neo4j_proxy = Neo4jProxy(host='DOES_NOT_MATTER', port=0000)
+            neo4j_proxy.add_badge(id='dummy_uri/dummy_column',
+                                  badge_name='hive',
+                                  resource_type=ResourceType.Column)
             # we call neo4j twice in add_tag call
             self.assertEqual(mock_run.call_count, 3)
             self.assertEqual(mock_commit.call_count, 1)
@@ -493,7 +515,7 @@ class TestNeo4jProxy(unittest.TestCase):
         with patch.object(GraphDatabase, 'driver'), patch.object(Neo4jProxy, '_execute_cypher_query') as mock_execute:
             mock_execute.return_value.single.return_value = {
                 'ts': {
-                    'latest_timestmap': '1000'
+                    'latest_timestamp': '1000'
                 }
             }
             neo4j_proxy = Neo4jProxy(host='DOES_NOT_MATTER', port=0000)
@@ -614,10 +636,22 @@ class TestNeo4jProxy(unittest.TestCase):
                 'email': 'test_email',
                 'manager_fullname': 'test_manager',
             }
+            test_user_obj = UserModel(email='test_email',
+                                      first_name='test_first_name',
+                                      last_name='test_last_name',
+                                      full_name='test_full_name',
+                                      is_active=True,
+                                      github_username='test-github',
+                                      team_name='test_team',
+                                      slack_id='test_id',
+                                      employee_type='teamMember',
+                                      manager_fullname='test_manager')
+
+    # TODO: Add frequent_used, bookmarked, & owned resources)
             mock_execute.return_value.single.return_value = {'users': [test_user]}
             neo4j_proxy = Neo4jProxy(host='DOES_NOT_MATTER', port=0000)
             users = neo4j_proxy.get_users()
-            actual_data = UserSchema(many=True).load([test_user]).data
+            actual_data = [test_user_obj]
             for attr in ['employee_type',
                          'full_name',
                          'is_active',

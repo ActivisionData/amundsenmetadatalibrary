@@ -6,24 +6,27 @@ import logging
 import re
 from operator import attrgetter
 from random import randint
-from typing import Any, Dict, List, Union, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from amundsen_common.models.dashboard import DashboardSummary
+from amundsen_common.models.lineage import Lineage
 from amundsen_common.models.popular_table import PopularTable
-from amundsen_common.models.table import Column, Stat, Table, Tag, User, Reader, \
-    ProgrammaticDescription, ResourceReport, Watermark
+from amundsen_common.models.table import (Badge, Column,
+                                          ProgrammaticDescription, Reader,
+                                          ResourceReport, Stat, Table, Tag,
+                                          User, Watermark)
 from amundsen_common.models.user import User as UserEntity
 from atlasclient.client import Atlas
 from atlasclient.exceptions import BadRequest, Conflict, NotFound
 from atlasclient.models import EntityUniqueAttribute
-from atlasclient.utils import (make_table_qualified_name,
-                               parse_table_qualified_name,
-                               extract_entities)
+from atlasclient.utils import (extract_entities, make_table_qualified_name,
+                               parse_table_qualified_name)
 from beaker.cache import CacheManager
 from beaker.util import parse_cache_config_options
 from flask import current_app as app
 
-from metadata_service.entity.dashboard_detail import DashboardDetail as DashboardDetailEntity
+from metadata_service.entity.dashboard_detail import \
+    DashboardDetail as DashboardDetailEntity
 from metadata_service.entity.description import Description
 from metadata_service.entity.resource_type import ResourceType
 from metadata_service.entity.tag_detail import TagDetail
@@ -48,8 +51,8 @@ class AtlasProxy(BaseProxy):
     Atlas Proxy client for the amundsen metadata
     {ATLAS_API_DOCS} = https://atlas.apache.org/api/v2/
     """
-    TABLE_ENTITY = app.config['ATLAS_TABLE_ENTITY']
-    DB_ATTRIBUTE = app.config['ATLAS_DB_ATTRIBUTE']
+    TABLE_ENTITY = 'Table'
+    DB_ATTRIBUTE = 'db'
     STATISTICS_FORMAT_SPEC = app.config['STATISTICS_FORMAT_SPEC']
     BOOKMARK_TYPE = 'Bookmark'
     USER_TYPE = 'User'
@@ -329,6 +332,14 @@ class AtlasProxy(BaseProxy):
             col_attrs = col_entity[self.ATTRS_KEY]
             statistics = list()
 
+            badges = list()
+
+            for column_classification in col_entity.get('classifications') or list():
+                if column_classification.get('entityStatus') == Status.ACTIVE:
+                    name = column_classification.get('typeName')
+
+                    badges.append(Badge(badge_name=name, category='default'))
+
             for stats in col_attrs.get('statistics') or list():
                 stats_attrs = stats['attributes']
 
@@ -367,6 +378,7 @@ class AtlasProxy(BaseProxy):
                     col_type=col_attrs.get('type') or col_attrs.get('dataType') or col_attrs.get('data_type'),
                     sort_order=col_attrs.get('position') or 9999,
                     stats=statistics,
+                    badges=badges
                 )
             )
         return sorted(columns, key=lambda item: item.sort_order)
@@ -1067,3 +1079,7 @@ class AtlasProxy(BaseProxy):
                                   id: str,
                                   resource_type: ResourceType) -> Dict[str, List[DashboardSummary]]:
         return {}
+
+    def get_lineage(self, *,
+                    id: str, resource_type: ResourceType, direction: str, depth: int) -> Lineage:
+        pass
